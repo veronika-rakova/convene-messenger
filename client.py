@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import messagebox
 import websockets
 from websockets.exceptions import ConnectionClosed
+from PIL import Image
 
 import numpy as np
 import matplotlib
@@ -106,11 +107,16 @@ class MessengerClient(ctk.CTk):
         self.editing_msg_id = None
         self.active_context_menu = None
 
+        # Глобальная переменная для контроля всплывающих окон
+        self.active_tooltip = None
+
         self.scheduler_obj = None
 
         self.config = self.load_config()
         self.server_host = self.config.get("server_host", SERVER_HOST)
         self.server_port = self.config.get("server_port", SERVER_PORT)
+
+        self.load_emoji_images()
 
         self.setup_ui()
         self.msg_queue = []
@@ -121,6 +127,21 @@ class MessengerClient(ctk.CTk):
         self.bind_all("<Button-1>", self.close_menu_on_click, add="+")
         self.withdraw()
         self.login_window = LoginWindow(self, self)
+
+    def load_emoji_images(self):
+        self.emoji_images = {}
+        emoji_files = {
+            "👍": "like.png", "❤️": "heart.png", "😂": "laugh.png",
+            "😲": "wow.png", "😢": "cry.png", "👏": "clap.png"
+        }
+
+        for emoji, filename in emoji_files.items():
+            path = os.path.join("emojis", filename)
+            if os.path.exists(path):
+                img = Image.open(path)
+                self.emoji_images[emoji] = ctk.CTkImage(light_image=img, dark_image=img, size=(18, 18))
+            else:
+                self.emoji_images[emoji] = None
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -223,31 +244,8 @@ class MessengerClient(ctk.CTk):
                                               text_color="gray", command=self.cancel_reply_edit)
         self.cancel_reply_btn.grid(row=0, column=1, rowspan=2, padx=10)
 
-        self.reply_frame = ctk.CTkFrame(self.chat_container, height=40, fg_color=("gray85", "gray20"), corner_radius=0)
-        self.reply_frame.grid_columnconfigure(0, weight=1)
-
-        # Заголовок (например, "Ответ пользователю" или "Редактирование")
-        self.reply_info_label = ctk.CTkLabel(self.reply_frame, text="", font=ctk.CTkFont(size=12, weight="bold"),
-                                             anchor="w")
-        self.reply_info_label.grid(row=0, column=0, padx=20, pady=(5, 0), sticky="ew")
-
-        # Текст самого сообщения (обрезанный, если длинный)
-        self.reply_text_label = ctk.CTkLabel(self.reply_frame, text="", font=ctk.CTkFont(size=11), text_color="gray",
-                                             anchor="w")
-        self.reply_text_label.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
-
-        # Кнопка отмены (крестик)
-        self.cancel_reply_btn = ctk.CTkButton(self.reply_frame, text="✖", width=30, fg_color="transparent",
-                                              text_color="gray", hover_color=("gray75", "gray30"),
-                                              command=self.cancel_reply_edit)
-        self.cancel_reply_btn.grid(row=0, column=1, rowspan=2, padx=10)
-
-        # Изначально панель скрыта
-        # self.reply_frame.grid(row=2, column=0, sticky="ew")
-
-        # --- ПОЛЕ ВВОДА СООБЩЕНИЯ ---
         self.input_frame = ctk.CTkFrame(self.chat_container, height=60, corner_radius=0)
-        self.input_frame.grid(row=3, column=0, sticky="ew")
+        self.input_frame.grid(row=2, column=0, sticky="ew")
         self.input_frame.grid_columnconfigure(0, weight=1)
 
         self.msg_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Введите сообщение...", state="disabled")
@@ -372,14 +370,9 @@ class MessengerClient(ctk.CTk):
         ctk.CTkButton(d, text="Добавить", command=submit, width=200).pack(pady=(20, 10))
 
     async def network_task(self):
-        # Если в конфиге стоит 0.0.0.0 (для сервера), локальный клиент использует 127.0.0.1
         actual_host = "127.0.0.1" if self.server_host == "0.0.0.0" else self.server_host
-
-        # Автоматически выбираем wss:// для Ngrok и ws:// для локалки
         protocol = "wss" if str(self.server_port) == "443" else "ws"
         uri = f"{protocol}://{actual_host}:{self.server_port}"
-
-        # Специальный заголовок для обхода экрана предупреждения Ngrok
         headers = {"ngrok-skip-browser-warning": "true"}
 
         while True:
@@ -398,7 +391,6 @@ class MessengerClient(ctk.CTk):
             except (ConnectionClosed, ConnectionRefusedError, OSError) as e:
                 self.websocket = None
                 self.queue_to_ui(lambda: self.update_connection_status("Нет связи. Переподключение...", "red"))
-                print(f"Ошибка подключения: {e}")
                 await asyncio.sleep(3)
 
     def run_asyncio_loop(self):
@@ -439,7 +431,7 @@ class MessengerClient(ctk.CTk):
             else:
                 self.queue_to_ui(lambda: self.login_window.show_error("Пользователь уже существует"))
         elif msg_type == "reaction_updated":
-            self.queue_to_ui(lambda: self.update_reactions_ui(data["msg_id"], data["reactions"]))
+            self.queue_to_ui(lambda d=data: self.update_reactions_ui(d["msg_id"], d["reactions"]))
 
         elif msg_type == "add_contact_result":
             if data["success"]:
@@ -461,19 +453,19 @@ class MessengerClient(ctk.CTk):
             if "unread_counts" in data: self.unread_counts = data["unread_counts"]
             self.queue_to_ui(self.update_contacts_ui)
         elif msg_type == "message_sent":
-            self.queue_to_ui(lambda: self.confirm_message_sent(data))
+            self.queue_to_ui(lambda d=data: self.confirm_message_sent(d))
         elif msg_type == "read_receipt":
-            self.queue_to_ui(lambda: self.process_read_receipt(data["reader"]))
+            self.queue_to_ui(lambda d=data: self.process_read_receipt(d["reader"]))
         elif msg_type == "typing":
-            self.queue_to_ui(lambda: self.show_typing_indicator(data["sender"], data.get("group")))
+            self.queue_to_ui(lambda d=data: self.show_typing_indicator(d["sender"], data.get("group")))
         elif msg_type in ["edit_message", "delete_message"]:
-            self.queue_to_ui(lambda: self.update_history_after_edit(data, msg_type))
+            self.queue_to_ui(lambda d=data: self.update_history_after_edit(d, msg_type))
         elif msg_type == "chat_history":
             if data["other_user"] == self.current_chat_user:
                 self.current_history_data = data["history"]
-                self.queue_to_ui(lambda: self.display_history(self.current_history_data))
+                self.queue_to_ui(lambda h=self.current_history_data: self.display_history(h))
         elif msg_type == "new_message":
-            self.queue_to_ui(lambda: self.receive_message(data))
+            self.queue_to_ui(lambda d=data: self.receive_message(d))
         elif msg_type == "schedule_data":
             chat_id = data["chat_id"]
             if chat_id == self.current_chat_user:
@@ -495,9 +487,13 @@ class MessengerClient(ctk.CTk):
         self.status_label.configure(text=text, text_color=color)
 
     def update_reactions_ui(self, msg_id, reactions_json):
-        if msg_id in self.message_bubbles:
-            self.message_bubbles[msg_id]["reactions"] = json.loads(reactions_json)
-            self.render_reactions(msg_id)
+        target_id = msg_id
+        if target_id not in self.message_bubbles:
+            target_id = str(msg_id) if isinstance(msg_id, int) else int(msg_id) if str(msg_id).isdigit() else msg_id
+
+        if target_id in self.message_bubbles:
+            self.message_bubbles[target_id]["reactions"] = json.loads(reactions_json)
+            self.render_reactions(target_id)
 
     def update_contacts_ui(self):
         for w in self.contacts_scroll.winfo_children(): w.destroy()
@@ -642,7 +638,8 @@ class MessengerClient(ctk.CTk):
             msg_id, sender, content, timestamp, status, reply_text, is_edited, is_deleted = msg[:8]
             reactions = json.loads(msg[8]) if len(msg) > 8 else {}
             if len(timestamp) > 5 and "-" in timestamp: timestamp = timestamp.split()[-1][:5]
-            self.add_message_bubble(sender, content, timestamp, msg_id, status, reply_text, is_edited, is_deleted, scroll=False, reactions=reactions)
+            self.add_message_bubble(sender, content, timestamp, msg_id, status, reply_text, is_edited, is_deleted,
+                                    scroll=False, reactions=reactions)
         self.after(50, self.scroll_to_bottom)
 
     def on_key_release_typing(self, event):
@@ -661,34 +658,28 @@ class MessengerClient(ctk.CTk):
     def setup_reply(self, sender, content):
         self.reply_to_data = f"{sender}: {content[:30]}..." if len(content) > 30 else f"{sender}: {content}"
         self.editing_msg_id = None
-        self.reply_info_label.configure(text=f"Ответ пользователю {sender}")
+        self.reply_info_label.configure(text="Ответ на сообщение")
         self.reply_text_label.configure(text=self.reply_to_data)
-
-        self.reply_frame.grid(row=2, column=0, sticky="ew")
+        self.reply_frame.grid(row=1, column=0, sticky="ew")
         self.msg_entry.focus()
-
-    def cancel_reply_edit(self):
-        self.reply_to_data = ""
-        self.editing_msg_id = None
-
-        self.reply_frame.grid_remove()
-        # if self.msg_entry.get(): self.msg_entry.delete(0, 'end')
 
     def setup_edit(self, msg_id, content):
         self.reply_to_data = ""
         self.editing_msg_id = msg_id
         self.reply_info_label.configure(text="Редактирование")
         self.reply_text_label.configure(text=content[:40] + ("..." if len(content) > 40 else ""))
-        self.reply_frame.grid(row=2, column=0, sticky="ew")
+        self.reply_frame.grid(row=1, column=0, sticky="ew")
         self.msg_entry.delete(0, 'end')
         self.msg_entry.insert(0, content)
         self.msg_entry.focus()
 
     def cancel_reply_edit(self):
+        was_editing = self.editing_msg_id is not None
         self.reply_to_data = ""
         self.editing_msg_id = None
         self.reply_frame.grid_remove()
-        if self.msg_entry.get(): self.msg_entry.delete(0, 'end')
+        if was_editing and self.msg_entry.get():
+            self.msg_entry.delete(0, 'end')
 
     def send_delete(self, msg_id):
         if messagebox.askyesno("Удаление", "Удалить сообщение?"):
@@ -745,77 +736,54 @@ class MessengerClient(ctk.CTk):
         if not w or w.get("is_deleted", False): return
         content, sender, is_me = w["content"], self.username if w["is_me"] else self.current_chat_user, w["is_me"]
 
-        if self.active_context_menu and self.active_context_menu.winfo_exists():
-            self.active_context_menu.destroy()
-
+        if self.active_context_menu and self.active_context_menu.winfo_exists(): self.active_context_menu.destroy()
         menu = ctk.CTkToplevel(self)
         menu.overrideredirect(True)
         menu.attributes("-topmost", True)
         menu.configure(fg_color=ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
-
-        frame = ctk.CTkFrame(menu, corner_radius=10, border_width=1,
-                             border_color=("gray80", "gray25"),
-                             fg_color=("gray95", "#1E1E1E"))
+        frame = ctk.CTkFrame(menu, corner_radius=8, border_width=1, border_color=("gray75", "gray25"),
+                             fg_color=("gray95", "gray15"))
         frame.pack(fill="both", expand=True)
         self.active_context_menu = menu
 
         def exc(func, *args):
-            menu.destroy()
+            menu.destroy();
             func(*args)
 
         emojis = ["👍", "❤️", "😂", "😲", "😢", "👏"]
         emoji_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        emoji_frame.pack(padx=8, pady=(8, 4), fill="x")
+        emoji_frame.pack(padx=4, pady=4, fill="x")
 
         for em in emojis:
-            btn = ctk.CTkButton(emoji_frame, text=em, width=32, height=32, corner_radius=16,
-                                fg_color="transparent",
-                                hover_color=("gray85", "gray30"),
-                                font=ctk.CTkFont(size=18),
-                                command=lambda e=em: exc(self.send_to_server,
-                                                         {"type": "toggle_reaction", "msg_id": msg_id, "reaction": e,
-                                                          "receiver": self.current_chat_user}))
+            img = getattr(self, 'emoji_images', {}).get(em)
+
+            cmd = lambda e=em, m=msg_id: exc(self.send_to_server, {
+                "type": "toggle_reaction",
+                "msg_id": self.temp_to_real_ids.get(m, m) if str(m).startswith("temp_") else m,
+                "reaction": e,
+                "receiver": self.current_chat_user
+            })
+
+            if img:
+                btn = ctk.CTkButton(emoji_frame, text="", image=img, width=32, height=32, corner_radius=16,
+                                    fg_color="transparent", hover_color=("gray85", "gray30"), command=cmd)
+            else:
+                btn = ctk.CTkButton(emoji_frame, text=em, width=32, height=32, corner_radius=16,
+                                    fg_color="transparent", hover_color=("gray85", "gray30"),
+                                    font=ctk.CTkFont(size=18), command=cmd)
             btn.pack(side="left", padx=1, expand=True)
 
-        separator = ctk.CTkFrame(frame, height=1, fg_color=("gray80", "gray30"))
-        separator.pack(fill="x", padx=10, pady=4)
-
-        opts = [("↩️ Ответить", lambda: exc(self.setup_reply, sender, content), ("black", "white"))]
+        opts = [("Ответить", lambda: exc(self.setup_reply, sender, content), ("black", "white"))]
 
         if is_me:
-            opts.extend([
-                ("✏️ Изменить", lambda: exc(self.setup_edit, msg_id, content), ("black", "white")),
-                ("🗑️ Удалить", lambda: exc(self.send_delete, msg_id), "#FF5555")
-            ])
-
-        opts_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        opts_frame.pack(fill="x", padx=4, pady=(0, 6))
-
-        for txt, cmd, col in opts:
-            btn = ctk.CTkButton(opts_frame, text=txt, height=32,
-                                fg_color="transparent",
-                                hover_color=("gray85", "gray30"),
-                                text_color=col, anchor="w",
-                                font=ctk.CTkFont(size=13),
-                                command=cmd)
-            btn.pack(fill="x", padx=2, pady=1)
-
-
+            opts.extend([("Изменить", lambda: exc(self.setup_edit, msg_id, content), ("black", "white")),
+                         ("Удалить", lambda: exc(self.send_delete, msg_id), "#FF5555")])
+        for i, (txt, cmd, col) in enumerate(opts):
+            ctk.CTkButton(frame, text=txt, width=140, height=30, fg_color="transparent",
+                          hover_color=("gray85", "gray25"), text_color=col, anchor="w", font=ctk.CTkFont(size=12),
+                          command=cmd).pack(padx=4, pady=(6 if i == 0 else 2, 6 if i == len(opts) - 1 else 2))
         menu.update_idletasks()
-        menu_width = menu.winfo_width()
-        menu_height = menu.winfo_height()
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-
-        x = event.x_root
-        y = event.y_root
-
-        if x + menu_width > screen_width:
-            x = screen_width - menu_width - 10
-        if y + menu_height > screen_height:
-            y = event.y_root - menu_height
-
-        menu.geometry(f"+{x}+{y}")
+        menu.geometry(f"+{event.x_root}+{event.y_root}")
 
     def process_read_receipt(self, reader):
         if reader == self.current_chat_user:
@@ -921,11 +889,18 @@ class MessengerClient(ctk.CTk):
         self.after(4000, tst.destroy)
 
     def render_reactions(self, msg_id):
+        # Принудительно прячем зависшие тултипы перед перерисовкой кнопок
+        if getattr(self, 'active_tooltip', None):
+            try:
+                self.active_tooltip.destroy()
+            except:
+                pass
+            self.active_tooltip = None
+
         w = self.message_bubbles.get(msg_id)
         if not w or w.get("is_deleted"): return
         reactions = w.get("reactions", {})
 
-        # Очищаем старый виджет, если он был
         if w.get("reactions_widget") and w["reactions_widget"].winfo_exists():
             w["reactions_widget"].destroy()
             w["reactions_widget"] = None
@@ -934,7 +909,7 @@ class MessengerClient(ctk.CTk):
             return
 
         rx_frame = ctk.CTkFrame(w["bubble_frame"], fg_color="transparent")
-        rx_frame.pack(padx=10, pady=(0, 4), anchor="w" if not w["is_me"] else "e")
+        rx_frame.pack(padx=10, pady=(0, 6), anchor="w" if not w["is_me"] else "e")
         w["reactions_widget"] = rx_frame
 
         for emoji, users in reactions.items():
@@ -944,14 +919,64 @@ class MessengerClient(ctk.CTk):
             bg_color = "#3B8ED0" if is_reacted else ("gray75", "gray30")
             text_color = "white" if is_reacted else ("black", "white")
 
-            def toggle(e=emoji, m=msg_id):
-                self.send_to_server(
-                    {"type": "toggle_reaction", "msg_id": m, "reaction": e, "receiver": self.current_chat_user})
+            cmd = lambda e=emoji, m=msg_id: self.send_to_server({
+                "type": "toggle_reaction",
+                "msg_id": self.temp_to_real_ids.get(m, m) if str(m).startswith("temp_") else m,
+                "reaction": e,
+                "receiver": self.current_chat_user
+            })
 
-            btn = ctk.CTkButton(rx_frame, text=f"{emoji} {count}", width=35, height=20, corner_radius=10,
-                                fg_color=bg_color, text_color=text_color, font=ctk.CTkFont(family="Segoe UI Emoji", size=11),
-                                hover_color=("#2B5278" if is_reacted else "gray60"), command=toggle)
+            img = getattr(self, 'emoji_images', {}).get(emoji)
+
+            if img:
+                btn = ctk.CTkButton(rx_frame, text=f" {count}", image=img, width=35, height=20, corner_radius=10,
+                                    fg_color=bg_color, text_color=text_color, font=ctk.CTkFont(size=11, weight="bold"),
+                                    hover_color=("#2B5278" if is_reacted else "gray60"), command=cmd)
+            else:
+                btn = ctk.CTkButton(rx_frame, text=f"{emoji} {count}", width=35, height=20, corner_radius=10,
+                                    fg_color=bg_color, text_color=text_color,
+                                    font=ctk.CTkFont(family="Segoe UI Emoji", size=11),
+                                    hover_color=("#2B5278" if is_reacted else "gray60"), command=cmd)
             btn.pack(side="left", padx=2)
+
+            tooltip_text = ", ".join(users)
+            self.create_tooltip(btn, tooltip_text)
+
+    def create_tooltip(self, widget, text):
+        tip_timer = [None]
+
+        def show_tip(event):
+            hide_tip()
+            # Добавляем задержку 400 мс перед показом окошка
+            tip_timer[0] = self.after(400, lambda: _draw_tip(event))
+
+        def _draw_tip(event):
+            hide_tip()  # На всякий случай чистим еще раз
+            tw = ctk.CTkToplevel(self)
+            tw.wm_overrideredirect(True)
+            tw.attributes("-topmost", True)
+            tw.geometry(f"+{event.x_root + 15}+{event.y_root + 15}")
+
+            lbl = ctk.CTkLabel(tw, text=text, fg_color=("gray85", "#1E1E1E"),
+                               text_color=("black", "white"), corner_radius=6,
+                               font=ctk.CTkFont(size=11, weight="bold"), padx=10, pady=4)
+            lbl.pack()
+            self.active_tooltip = tw
+
+        def hide_tip(event=None):
+            if tip_timer[0]:
+                self.after_cancel(tip_timer[0])
+                tip_timer[0] = None
+            if getattr(self, 'active_tooltip', None):
+                try:
+                    self.active_tooltip.destroy()
+                except:
+                    pass
+                self.active_tooltip = None
+
+        widget.bind("<Enter>", show_tip)
+        widget.bind("<Leave>", hide_tip)
+        widget.bind("<ButtonPress>", hide_tip)  # Скрываем при клике
 
     def add_message_bubble(self, sender, content, timestamp, msg_id=None, status=0, reply_text="", is_edited=False,
                            is_deleted=False, scroll=True, reactions=None):
@@ -1012,7 +1037,6 @@ class MessengerClient(ctk.CTk):
                     status_label_2.place(x=4, rely=0.5, anchor="w")
 
         bind_event = "<Button-2>" if platform.system() == "Darwin" else "<Button-3>"
-
 
         def bind_tree(widget, m_id):
             widget.bind(bind_event, lambda e: self.show_context_menu(e, m_id))

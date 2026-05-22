@@ -1,5 +1,5 @@
 DB_NAME = "messenger.db"
-SERVER_HOST = "steadily-deceiver-upheaval.ngrok-free.dev"
-SERVER_PORT = 443
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8765
 CONFIG_FILE = "client_config.json"
 
