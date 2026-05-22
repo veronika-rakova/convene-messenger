@@ -16,10 +16,8 @@ class InteractiveScheduler:
         self.my_nick = str(my_nick).strip().lower()
         self.schedules = schedules_data
         self.num_people = len(self.schedules)
-        self.visible_count = min(self.num_people, 4)
         self.on_grid_update = on_grid_update
 
-        self.current_scroll = 0
         self.mouse_pos = None
         self.last_hovered_axis = None
 
@@ -31,17 +29,11 @@ class InteractiveScheduler:
         self.ACCENT_BLUE = "#3B8ED0" if is_dark else "#1F6AA5"
         self.TEXT_DIM = "#888888" if is_dark else "#555555"
 
-        self.fig = Figure(figsize=(8, 10), dpi=100, facecolor=self.REF_BG, constrained_layout=False)
-        self.fig.subplots_adjust(left=0.1, right=0.95, top=0.90, bottom=0.08, hspace=0.6)
-
-        self.canvas = FigureCanvasTkAgg(self.fig, master=container)
-        self.canvas_widget = self.canvas.get_tk_widget()
-        self.canvas_widget.pack(fill=tk.BOTH, expand=True)
-
+        # 1. СТАТИЧНАЯ ПАНЕЛЬ УПРАВЛЕНИЯ
         btn_style = {"fg_color": self.REF_GRID, "text_color": self.ACCENT_BLUE,
                      "font": ctk.CTkFont(size=12, weight="bold")}
         self.controls_frame = ctk.CTkFrame(container, fg_color="transparent", height=40)
-        self.controls_frame.pack(fill="x", padx=10, pady=(5, 0), before=self.canvas_widget)
+        self.controls_frame.pack(fill="x", padx=10, pady=(5, 0))
 
         ctk.CTkButton(self.controls_frame, text="ОЧИСТИТЬ (R)", command=self.action_reset, **btn_style).pack(
             side="left", padx=2)
@@ -53,82 +45,94 @@ class InteractiveScheduler:
         ctk.CTkButton(self.controls_frame, text="💾 СОХРАНИТЬ", command=self.action_save_matches, fg_color="#2B5278",
                       text_color="white", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=10)
 
-        ctk.CTkLabel(self.controls_frame, text="ЛКМ: изменить своё | Наведите курсор для хоткеев",
-                     text_color=self.TEXT_DIM,
-                     font=ctk.CTkFont(size=10)).pack(side="right", padx=10)
+        # 2. СКРОЛЛИРУЕМАЯ ОБЛАСТЬ ДЛЯ ГРАФИКОВ
+        self.scroll_frame = ctk.CTkScrollableFrame(container, fg_color="transparent")
+        self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-        self.axes = self.fig.subplots(self.visible_count + 1, 1)
+        # 3. ДИНАМИЧЕСКИЙ РАСЧЕТ ВЫСОТЫ
+        total_plots = self.num_people + 1
+        plot_height_inches = 2.8  # Увеличена высота каждого графика
+        fig_height = max(7.0, total_plots * plot_height_inches)
+
+        self.fig = Figure(figsize=(8, fig_height), dpi=100, facecolor=self.REF_BG, constrained_layout=False)
+
+        top_margin = 1.0 - (0.4 / fig_height)
+        bottom_margin = 0.4 / fig_height
+        # Уменьшено пространство между графиками, чтобы они стояли кучнее
+        self.fig.subplots_adjust(left=0.08, right=0.95, top=top_margin, bottom=bottom_margin, hspace=0.45)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.scroll_frame)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(fill="both", expand=True)
+
+        self.axes = self.fig.subplots(total_plots, 1)
         if not isinstance(self.axes, (list, np.ndarray)): self.axes = np.array([self.axes])
 
         self.imgs = []
-        for i in range(self.visible_count + 1):
+        for i in range(total_plots):
             ax = self.axes[i]
             ax.set_facecolor(self.REF_GRID)
-            asp = 1.2
-            if i < self.visible_count:
-                img = ax.imshow(np.zeros((7, 24)), aspect=asp, cmap='Blues', vmin=0, vmax=1, interpolation='nearest')
-                self.imgs.append(img)
-            else:
-                self.res_img = ax.imshow(np.zeros((7, 24)), aspect=asp, cmap='Greens', vmin=0, vmax=1,
-                                         interpolation='nearest')
-                ax.set_title("ОБЩИЙ ПЛАН (СОВПАДЕНИЯ)", color=self.TEXT_DIM, fontweight='bold', fontsize=9, pad=10)
+            asp = "auto"  # Позволяет ячейкам растягиваться по высоте
 
-            ax.set_box_aspect(7 / 24)
+            # Отрисовка расписаний пользователей
+            if i < self.num_people:
+                s = self.schedules[i]
+                img = ax.imshow(s['grid'], aspect=asp, cmap='Blues', vmin=0, vmax=1, interpolation='nearest')
+                self.imgs.append(img)
+
+                is_me = str(s['nick']).lower() == self.my_nick
+                name = f" {str(s['nick']).upper()} " + ("(ВЫ)" if is_me else "")
+                text_col = "white" if is_me else ("black" if self.REF_BG == "#F0F0F0" else "white")
+                bg_col = self.ACCENT_BLUE if is_me else self.REF_HEADER
+                ax.set_title(name, color=text_col, fontsize=10, fontweight='bold', loc='left', backgroundcolor=bg_col)
+
+            # Отрисовка финального общего плана
+            else:
+                self.res_img = ax.imshow(self.get_common_gradient(), aspect=asp, cmap='Greens', vmin=0, vmax=1,
+                                         interpolation='nearest')
+                ax.set_title("ОБЩИЙ ПЛАН (СОВПАДЕНИЯ)", color=self.TEXT_DIM, fontweight='bold', fontsize=11, pad=10)
+
+            # Форматирование осей
             ax.set_xticks(range(24))
             ax.set_yticks(range(7))
-            ax.set_yticklabels(['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'], fontsize=7, color=self.ACCENT_BLUE,
+            ax.set_yticklabels(['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'], fontsize=8, color=self.ACCENT_BLUE,
                                fontweight='bold')
-            ax.tick_params(colors=self.TEXT_DIM, labelsize=6, length=0, pad=2)
+            ax.tick_params(colors=self.TEXT_DIM, labelsize=7, length=0, pad=2)
             ax.set_xticks(np.arange(-.5, 24, 1), minor=True)
             ax.set_yticks(np.arange(-.5, 7, 1), minor=True)
             ax.grid(which="minor", color=self.REF_LINES, linestyle='-', linewidth=0.5)
             for spine in ax.spines.values(): spine.set_edgecolor(self.REF_LINES)
 
+        # Подключение обработчиков событий
         self.canvas.mpl_connect('button_press_event', self.on_press)
         self.canvas.mpl_connect('motion_notify_event', self.on_motion)
-        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+
+        # Перехват скроллинга колесиком мыши над Matplotlib
+        self.canvas.mpl_connect('scroll_event', self._forward_scroll)
         container.winfo_toplevel().bind("<KeyPress>", self.on_key_tk)
 
-        self.update_view()
+    def _forward_scroll(self, event):
+        """Пробрасывает события колесика мыши в системный скроллбар."""
+        if event.button == 'up':
+            self.scroll_frame._parent_canvas.yview_scroll(-1, "units")
+        elif event.button == 'down':
+            self.scroll_frame._parent_canvas.yview_scroll(1, "units")
 
     def update_data_from_server(self, nick, new_grid_list):
-        for s in self.schedules:
+        for i, s in enumerate(self.schedules):
             if str(s['nick']).lower() == str(nick).lower():
                 s['grid'] = np.array(new_grid_list)
                 self.update_view()
                 break
 
-    def on_scroll(self, event):
-        if event.button == 'up':
-            self.scroll_up()
-        elif event.button == 'down':
-            self.scroll_down()
-
-    def scroll_up(self):
-        self.current_scroll = max(0, self.current_scroll - 1)
-        self.update_view()
-
-    def scroll_down(self):
-        self.current_scroll = min(max(0, self.num_people - self.visible_count), self.current_scroll + 1)
-        self.update_view()
-
     def update_view(self):
-        for i in range(self.visible_count):
-            idx = self.current_scroll + i
-            ax = self.axes[i]
-            if idx < self.num_people:
-                s = self.schedules[idx]
-                self.imgs[i].set_data(s['grid'])
-                is_me = str(s['nick']).lower() == self.my_nick
-                name = f" {str(s['nick']).upper()} " + ("(ВЫ)" if is_me else "")
-                text_col = "white" if is_me else ("black" if self.REF_BG == "#F0F0F0" else "white")
-                bg_col = self.ACCENT_BLUE if is_me else self.REF_HEADER
-                ax.set_title(name, color=text_col, fontsize=8, fontweight='bold', loc='left', backgroundcolor=bg_col)
-                ax.set_visible(True)
-            else:
-                ax.set_visible(False)
+        # Обновляем графики ВСЕХ пользователей
+        for i in range(self.num_people):
+            self.imgs[i].set_data(self.schedules[i]['grid'])
+
+        # Затем обновляем общий план
         self.res_img.set_data(self.get_common_gradient())
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def get_common_gradient(self):
         if not self.schedules or self.num_people == 0: return np.zeros((7, 24))
@@ -143,9 +147,9 @@ class InteractiveScheduler:
 
     def find_hovered_schedule_idx(self):
         if self.mouse_pos and self.last_hovered_axis:
-            for i in range(self.visible_count):
+            for i in range(self.num_people):
                 if self.last_hovered_axis == self.axes[i]:
-                    return self.current_scroll + i
+                    return i
         return None
 
     def _trigger_update(self, nick, grid):
@@ -200,11 +204,7 @@ class InteractiveScheduler:
 
     def on_key_tk(self, event):
         key = event.keysym.lower()
-        if key == 'up':
-            self.scroll_up()
-        elif key == 'down':
-            self.scroll_down()
-        elif key in ['s', 'ы', 'save']:
+        if key in ['s', 'ы', 'save']:
             self.action_save_matches()
 
         idx = self.find_hovered_schedule_idx()
@@ -231,11 +231,9 @@ class InteractiveScheduler:
 
     def on_press(self, event):
         if event.inaxes is None: return
-        for i in range(self.visible_count):
+        for i in range(self.num_people):
             if event.inaxes == self.axes[i]:
-                idx = self.current_scroll + i
-                if idx >= len(self.schedules): continue
-
+                idx = i
                 if str(self.schedules[idx]['nick']).lower() != self.my_nick:
                     return
 
