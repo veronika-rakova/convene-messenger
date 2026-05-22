@@ -5,6 +5,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 from database import Database
 
+
 class MessengerServer:
     def __init__(self, host, port):
         self.host = host

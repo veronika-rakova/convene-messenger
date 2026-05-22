@@ -21,6 +21,5 @@ def main():
     else:
         print("Неверный выбор. Завершение.")
 
-
 if __name__ == "__main__":
     main()
