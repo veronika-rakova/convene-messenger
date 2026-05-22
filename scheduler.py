@@ -34,8 +34,23 @@ class InteractiveScheduler:
 
         ctk.CTkButton(self.controls_frame, text="ОЧИСТИТЬ (R)", command=self.action_reset, **btn_style).pack(
             side="left", padx=2)
-        ctk.CTkButton(self.controls_frame, text="ДЕНЬ (D)", command=self.action_fill_day, **btn_style).pack(side="left",
-                                                                                                            padx=2)
+        self.day_menu = ctk.CTkOptionMenu(
+            self.controls_frame,
+            values=['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'],
+            command=self.action_fill_specific_day,
+            fg_color=self.REF_GRID,
+            button_color=self.REF_GRID,
+            button_hover_color=self.REF_HEADER,
+            text_color=self.ACCENT_BLUE,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            dropdown_fg_color=self.REF_BG,
+            dropdown_text_color=self.ACCENT_BLUE,
+            width=100
+        )
+        self.day_menu.set("ДЕНЬ ▼")  # Устанавливаем текст по умолчанию
+        self.day_menu.pack(side="left", padx=2)
+        # ----------------------------------------
+
         ctk.CTkButton(self.controls_frame, text="НЕДЕЛЯ (F)", command=self.action_fill_week, **btn_style).pack(
             side="left", padx=2)
 
@@ -176,6 +191,25 @@ class InteractiveScheduler:
                 grid[d, :] = 1.0 - grid[d, :]
                 self._trigger_update(self.schedules[idx]['nick'], grid)
                 self.update_view()
+
+    def action_fill_specific_day(self, selected_day):
+        idx = self.find_my_schedule_idx()
+        if idx is not None:
+            day_map = {'ПН': 0, 'ВТ': 1, 'СР': 2, 'ЧТ': 3, 'ПТ': 4, 'СБ': 5, 'ВС': 6}
+            d = day_map.get(selected_day)
+
+            if d is not None:
+                grid = self.schedules[idx]['grid']
+
+                if np.all(grid[d, :] == 1.0):
+                    grid[d, :] = 0.0
+                else:
+                    grid[d, :] = 1.0
+
+                self._trigger_update(self.schedules[idx]['nick'], grid)
+                self.update_view()
+
+        self.day_menu.set("ДЕНЬ ▼")
 
     def action_save_matches(self):
         try:

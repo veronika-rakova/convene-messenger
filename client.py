@@ -223,8 +223,31 @@ class MessengerClient(ctk.CTk):
                                               text_color="gray", command=self.cancel_reply_edit)
         self.cancel_reply_btn.grid(row=0, column=1, rowspan=2, padx=10)
 
+        self.reply_frame = ctk.CTkFrame(self.chat_container, height=40, fg_color=("gray85", "gray20"), corner_radius=0)
+        self.reply_frame.grid_columnconfigure(0, weight=1)
+
+        # Заголовок (например, "Ответ пользователю" или "Редактирование")
+        self.reply_info_label = ctk.CTkLabel(self.reply_frame, text="", font=ctk.CTkFont(size=12, weight="bold"),
+                                             anchor="w")
+        self.reply_info_label.grid(row=0, column=0, padx=20, pady=(5, 0), sticky="ew")
+
+        # Текст самого сообщения (обрезанный, если длинный)
+        self.reply_text_label = ctk.CTkLabel(self.reply_frame, text="", font=ctk.CTkFont(size=11), text_color="gray",
+                                             anchor="w")
+        self.reply_text_label.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
+
+        # Кнопка отмены (крестик)
+        self.cancel_reply_btn = ctk.CTkButton(self.reply_frame, text="✖", width=30, fg_color="transparent",
+                                              text_color="gray", hover_color=("gray75", "gray30"),
+                                              command=self.cancel_reply_edit)
+        self.cancel_reply_btn.grid(row=0, column=1, rowspan=2, padx=10)
+
+        # Изначально панель скрыта
+        # self.reply_frame.grid(row=2, column=0, sticky="ew")
+
+        # --- ПОЛЕ ВВОДА СООБЩЕНИЯ ---
         self.input_frame = ctk.CTkFrame(self.chat_container, height=60, corner_radius=0)
-        self.input_frame.grid(row=2, column=0, sticky="ew")
+        self.input_frame.grid(row=3, column=0, sticky="ew")
         self.input_frame.grid_columnconfigure(0, weight=1)
 
         self.msg_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Введите сообщение...", state="disabled")
@@ -349,12 +372,21 @@ class MessengerClient(ctk.CTk):
         ctk.CTkButton(d, text="Добавить", command=submit, width=200).pack(pady=(20, 10))
 
     async def network_task(self):
+        # Если в конфиге стоит 0.0.0.0 (для сервера), локальный клиент использует 127.0.0.1
+        actual_host = "127.0.0.1" if self.server_host == "0.0.0.0" else self.server_host
+
+        # Автоматически выбираем wss:// для Ngrok и ws:// для локалки
         protocol = "wss" if str(self.server_port) == "443" else "ws"
-        uri = f"{protocol}://{self.server_host}:{self.server_port}"
+        uri = f"{protocol}://{actual_host}:{self.server_port}"
+
+        # Специальный заголовок для обхода экрана предупреждения Ngrok
+        headers = {"ngrok-skip-browser-warning": "true"}
+
         while True:
             try:
                 self.queue_to_ui(lambda: self.update_connection_status("Подключение...", "orange"))
-                async with websockets.connect(uri) as ws:
+
+                async with websockets.connect(uri, additional_headers=headers) as ws:
                     self.websocket = ws
                     self.queue_to_ui(lambda: self.update_connection_status("Подключено", "green"))
                     if self.username and self.password:
@@ -363,9 +395,10 @@ class MessengerClient(ctk.CTk):
                     async for message in ws:
                         data = json.loads(message)
                         self.process_server_message(data)
-            except (ConnectionClosed, ConnectionRefusedError, OSError):
+            except (ConnectionClosed, ConnectionRefusedError, OSError) as e:
                 self.websocket = None
                 self.queue_to_ui(lambda: self.update_connection_status("Нет связи. Переподключение...", "red"))
+                print(f"Ошибка подключения: {e}")
                 await asyncio.sleep(3)
 
     def run_asyncio_loop(self):
@@ -628,10 +661,18 @@ class MessengerClient(ctk.CTk):
     def setup_reply(self, sender, content):
         self.reply_to_data = f"{sender}: {content[:30]}..." if len(content) > 30 else f"{sender}: {content}"
         self.editing_msg_id = None
-        self.reply_info_label.configure(text="Ответ на сообщение")
+        self.reply_info_label.configure(text=f"Ответ пользователю {sender}")
         self.reply_text_label.configure(text=self.reply_to_data)
+
         self.reply_frame.grid(row=2, column=0, sticky="ew")
         self.msg_entry.focus()
+
+    def cancel_reply_edit(self):
+        self.reply_to_data = ""
+        self.editing_msg_id = None
+
+        self.reply_frame.grid_remove()
+        # if self.msg_entry.get(): self.msg_entry.delete(0, 'end')
 
     def setup_edit(self, msg_id, content):
         self.reply_to_data = ""
@@ -704,39 +745,77 @@ class MessengerClient(ctk.CTk):
         if not w or w.get("is_deleted", False): return
         content, sender, is_me = w["content"], self.username if w["is_me"] else self.current_chat_user, w["is_me"]
 
-        if self.active_context_menu and self.active_context_menu.winfo_exists(): self.active_context_menu.destroy()
+        if self.active_context_menu and self.active_context_menu.winfo_exists():
+            self.active_context_menu.destroy()
+
         menu = ctk.CTkToplevel(self)
         menu.overrideredirect(True)
         menu.attributes("-topmost", True)
         menu.configure(fg_color=ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
-        frame = ctk.CTkFrame(menu, corner_radius=8, border_width=1, border_color=("gray75", "gray25"), fg_color=("gray95", "gray15"))
+
+        frame = ctk.CTkFrame(menu, corner_radius=10, border_width=1,
+                             border_color=("gray80", "gray25"),
+                             fg_color=("gray95", "#1E1E1E"))
         frame.pack(fill="both", expand=True)
         self.active_context_menu = menu
 
         def exc(func, *args):
-            menu.destroy();
+            menu.destroy()
             func(*args)
 
         emojis = ["👍", "❤️", "😂", "😲", "😢", "👏"]
         emoji_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        emoji_frame.pack(padx=4, pady=4, fill="x")
-        for em in emojis:
-            btn = ctk.CTkButton(emoji_frame, text=em, width=32, height=32, corner_radius=16, fg_color="transparent",
-                                hover_color=("gray85", "gray25"), font=ctk.CTkFont(family="Segoe UI Emoji", size=18),
-                                command=lambda e=em: exc(self.send_to_server, {"type": "toggle_reaction", "msg_id": msg_id, "reaction": e, "receiver": self.current_chat_user}))
-            btn.pack(side="left", padx=2, expand=True)
+        emoji_frame.pack(padx=8, pady=(8, 4), fill="x")
 
-        opts = [("Ответить", lambda: exc(self.setup_reply, sender, content), ("black", "white"))]
+        for em in emojis:
+            btn = ctk.CTkButton(emoji_frame, text=em, width=32, height=32, corner_radius=16,
+                                fg_color="transparent",
+                                hover_color=("gray85", "gray30"),
+                                font=ctk.CTkFont(size=18),
+                                command=lambda e=em: exc(self.send_to_server,
+                                                         {"type": "toggle_reaction", "msg_id": msg_id, "reaction": e,
+                                                          "receiver": self.current_chat_user}))
+            btn.pack(side="left", padx=1, expand=True)
+
+        separator = ctk.CTkFrame(frame, height=1, fg_color=("gray80", "gray30"))
+        separator.pack(fill="x", padx=10, pady=4)
+
+        opts = [("↩️ Ответить", lambda: exc(self.setup_reply, sender, content), ("black", "white"))]
 
         if is_me:
-            opts.extend([("Изменить", lambda: exc(self.setup_edit, msg_id, content), ("black", "white")),
-                         ("Удалить", lambda: exc(self.send_delete, msg_id), "#FF5555")])
-        for i, (txt, cmd, col) in enumerate(opts):
-            ctk.CTkButton(frame, text=txt, width=140, height=30, fg_color="transparent",
-                          hover_color=("gray85", "gray25"), text_color=col, anchor="w", font=ctk.CTkFont(size=12),
-                          command=cmd).pack(padx=4, pady=(6 if i == 0 else 2, 6 if i == len(opts) - 1 else 2))
+            opts.extend([
+                ("✏️ Изменить", lambda: exc(self.setup_edit, msg_id, content), ("black", "white")),
+                ("🗑️ Удалить", lambda: exc(self.send_delete, msg_id), "#FF5555")
+            ])
+
+        opts_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        opts_frame.pack(fill="x", padx=4, pady=(0, 6))
+
+        for txt, cmd, col in opts:
+            btn = ctk.CTkButton(opts_frame, text=txt, height=32,
+                                fg_color="transparent",
+                                hover_color=("gray85", "gray30"),
+                                text_color=col, anchor="w",
+                                font=ctk.CTkFont(size=13),
+                                command=cmd)
+            btn.pack(fill="x", padx=2, pady=1)
+
+
         menu.update_idletasks()
-        menu.geometry(f"+{event.x_root}+{event.y_root}")
+        menu_width = menu.winfo_width()
+        menu_height = menu.winfo_height()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+
+        x = event.x_root
+        y = event.y_root
+
+        if x + menu_width > screen_width:
+            x = screen_width - menu_width - 10
+        if y + menu_height > screen_height:
+            y = event.y_root - menu_height
+
+        menu.geometry(f"+{x}+{y}")
 
     def process_read_receipt(self, reader):
         if reader == self.current_chat_user:
