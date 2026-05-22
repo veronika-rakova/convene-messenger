@@ -47,7 +47,7 @@ class InteractiveScheduler:
             dropdown_text_color=self.ACCENT_BLUE,
             width=100
         )
-        self.day_menu.set("ДЕНЬ ▼")  # Устанавливаем текст по умолчанию
+        self.day_menu.set("ДЕНЬ (D)")  # Устанавливаем текст по умолчанию
         self.day_menu.pack(side="left", padx=2)
         # ----------------------------------------
 
@@ -209,7 +209,7 @@ class InteractiveScheduler:
                 self._trigger_update(self.schedules[idx]['nick'], grid)
                 self.update_view()
 
-        self.day_menu.set("ДЕНЬ ▼")
+        self.day_menu.set("ДЕНЬ (D)")
 
     def action_save_matches(self):
         try:
