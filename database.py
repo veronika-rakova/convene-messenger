@@ -99,7 +99,7 @@ class Database:
             self.conn.commit()
             return True, name
         except sqlite3.IntegrityError:
-            return False, "Такая группа уже есть"
+            return False, "Такая группа уже существует"
 
     def get_group_members(self, group_name):
         self.cursor.execute('SELECT username FROM group_members WHERE group_name = ?', (group_name,))

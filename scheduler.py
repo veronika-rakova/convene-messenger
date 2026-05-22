@@ -1,6 +1,4 @@
 import os
-import time
-import tkinter as tk
 import customtkinter as ctk
 import numpy as np
 from tkinter import messagebox
@@ -29,7 +27,6 @@ class InteractiveScheduler:
         self.ACCENT_BLUE = "#3B8ED0" if is_dark else "#1F6AA5"
         self.TEXT_DIM = "#888888" if is_dark else "#555555"
 
-        # 1. СТАТИЧНАЯ ПАНЕЛЬ УПРАВЛЕНИЯ
         btn_style = {"fg_color": self.REF_GRID, "text_color": self.ACCENT_BLUE,
                      "font": ctk.CTkFont(size=12, weight="bold")}
         self.controls_frame = ctk.CTkFrame(container, fg_color="transparent", height=40)
@@ -45,20 +42,17 @@ class InteractiveScheduler:
         ctk.CTkButton(self.controls_frame, text="💾 СОХРАНИТЬ", command=self.action_save_matches, fg_color="#2B5278",
                       text_color="white", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=10)
 
-        # 2. СКРОЛЛИРУЕМАЯ ОБЛАСТЬ ДЛЯ ГРАФИКОВ
         self.scroll_frame = ctk.CTkScrollableFrame(container, fg_color="transparent")
         self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-        # 3. ДИНАМИЧЕСКИЙ РАСЧЕТ ВЫСОТЫ
         total_plots = self.num_people + 1
-        plot_height_inches = 2.8  # Увеличена высота каждого графика
+        plot_height_inches = 2.8
         fig_height = max(7.0, total_plots * plot_height_inches)
 
         self.fig = Figure(figsize=(8, fig_height), dpi=100, facecolor=self.REF_BG, constrained_layout=False)
 
         top_margin = 1.0 - (0.4 / fig_height)
         bottom_margin = 0.4 / fig_height
-        # Уменьшено пространство между графиками, чтобы они стояли кучнее
         self.fig.subplots_adjust(left=0.08, right=0.95, top=top_margin, bottom=bottom_margin, hspace=0.45)
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.scroll_frame)
@@ -72,9 +66,8 @@ class InteractiveScheduler:
         for i in range(total_plots):
             ax = self.axes[i]
             ax.set_facecolor(self.REF_GRID)
-            asp = "auto"  # Позволяет ячейкам растягиваться по высоте
+            asp = "auto"
 
-            # Отрисовка расписаний пользователей
             if i < self.num_people:
                 s = self.schedules[i]
                 img = ax.imshow(s['grid'], aspect=asp, cmap='Blues', vmin=0, vmax=1, interpolation='nearest')
@@ -86,13 +79,11 @@ class InteractiveScheduler:
                 bg_col = self.ACCENT_BLUE if is_me else self.REF_HEADER
                 ax.set_title(name, color=text_col, fontsize=10, fontweight='bold', loc='left', backgroundcolor=bg_col)
 
-            # Отрисовка финального общего плана
             else:
                 self.res_img = ax.imshow(self.get_common_gradient(), aspect=asp, cmap='Greens', vmin=0, vmax=1,
                                          interpolation='nearest')
                 ax.set_title("ОБЩИЙ ПЛАН (СОВПАДЕНИЯ)", color=self.TEXT_DIM, fontweight='bold', fontsize=11, pad=10)
 
-            # Форматирование осей
             ax.set_xticks(range(24))
             ax.set_yticks(range(7))
             ax.set_yticklabels(['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'], fontsize=8, color=self.ACCENT_BLUE,
@@ -103,16 +94,13 @@ class InteractiveScheduler:
             ax.grid(which="minor", color=self.REF_LINES, linestyle='-', linewidth=0.5)
             for spine in ax.spines.values(): spine.set_edgecolor(self.REF_LINES)
 
-        # Подключение обработчиков событий
         self.canvas.mpl_connect('button_press_event', self.on_press)
         self.canvas.mpl_connect('motion_notify_event', self.on_motion)
 
-        # Перехват скроллинга колесиком мыши над Matplotlib
         self.canvas.mpl_connect('scroll_event', self._forward_scroll)
         container.winfo_toplevel().bind("<KeyPress>", self.on_key_tk)
 
     def _forward_scroll(self, event):
-        """Пробрасывает события колесика мыши в системный скроллбар."""
         if event.button == 'up':
             self.scroll_frame._parent_canvas.yview_scroll(-1, "units")
         elif event.button == 'down':
@@ -126,11 +114,9 @@ class InteractiveScheduler:
                 break
 
     def update_view(self):
-        # Обновляем графики ВСЕХ пользователей
         for i in range(self.num_people):
             self.imgs[i].set_data(self.schedules[i]['grid'])
 
-        # Затем обновляем общий план
         self.res_img.set_data(self.get_common_gradient())
         self.canvas.draw_idle()
 
@@ -195,9 +181,9 @@ class InteractiveScheduler:
         try:
             desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
             if not os.path.exists(desktop): desktop = os.getcwd()
-            filename = os.path.join(desktop, f"Расписание_{self.my_nick}_{int(time.time())}.png")
+            filename = os.path.join(desktop, f"Расписание_{self.my_nick}.png")
             self.fig.savefig(filename, facecolor=self.fig.get_facecolor(), bbox_inches='tight')
-            messagebox.showinfo("Сохранено", f"Расписание успешно сохранено на рабочий стол:\n{filename}")
+            messagebox.showinfo("Сохранено", f"Расписание сохранено на рабочий стол:\n{filename}")
         except Exception:
             self.fig.savefig("Schedule_Match.png")
             messagebox.showinfo("Сохранено", "Расписание сохранено в папку с программой (Schedule_Match.png)")

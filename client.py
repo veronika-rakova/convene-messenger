@@ -270,7 +270,6 @@ class MessengerClient(ctk.CTk):
         if (v := d.get_input()): self.send_to_server({"type": "add_contact", "contact": v.strip()})
 
     def prompt_create_group(self):
-        # Получаем список контактов (исключая группы)
         contacts = [u for u in self.users_status.keys() if not u.startswith("#")]
         if not contacts:
             messagebox.showwarning("Внимание", "У вас нет контактов для добавления в группу.")
@@ -950,7 +949,6 @@ class MessengerClient(ctk.CTk):
                 "reply_lbl": reply_lbl_widget,
                 "bubble_frame": bubble, "reactions": reactions or {}, "reactions_widget": None
             }
-            # Обязательно вызываем отрисовку!
             self.render_reactions(msg_id)
 
         if scroll:

@@ -3,7 +3,6 @@ import json
 from datetime import datetime
 import websockets
 from websockets.exceptions import ConnectionClosed
-
 from database import Database
 
 class MessengerServer:

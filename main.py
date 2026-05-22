@@ -3,7 +3,7 @@ from server import MessengerServer
 from client import MessengerClient
 from config import SERVER_HOST, SERVER_PORT
 
-
+#ручной запуск сервера и клиентов
 def main():
     print("Выберите режим запуска:")
     print("1 - Запустить сервер")
