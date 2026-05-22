@@ -3,8 +3,8 @@ import json
 import hashlib
 import numpy as np
 from datetime import datetime
-
 from config import DB_NAME
+
 
 class Database:
     def __init__(self, db_name=DB_NAME):
