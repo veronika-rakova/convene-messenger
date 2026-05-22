@@ -13,5 +13,5 @@ python main.py
 
 
 Тестовые пользователи:
-user1, user2, user3, user4 — пароль для всех: 1234.
+user1, user2, user3, user4 - пароль для всех: 1234.
 
