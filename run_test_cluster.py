@@ -4,7 +4,6 @@ import asyncio
 
 
 def run_server():
-
     try:
         from server import MessengerServer
         from config import SERVER_HOST, SERVER_PORT

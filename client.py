@@ -349,7 +349,8 @@ class MessengerClient(ctk.CTk):
         ctk.CTkButton(d, text="Добавить", command=submit, width=200).pack(pady=(20, 10))
 
     async def network_task(self):
-        uri = f"ws://{self.server_host}:{self.server_port}"
+        protocol = "wss" if str(self.server_port) == "443" else "ws"
+        uri = f"{protocol}://{self.server_host}:{self.server_port}"
         while True:
             try:
                 self.queue_to_ui(lambda: self.update_connection_status("Подключение...", "orange"))
